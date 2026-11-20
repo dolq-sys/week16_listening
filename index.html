@@ -22,9 +22,14 @@ button{font-family:inherit;cursor:pointer}
 .brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:0;font-weight:400}
 .cand{font-size:14px;color:var(--muted)}
 .cand b{color:var(--ink)}
+#hdr audio{height:38px;width:min(460px,38vw);margin-left:auto}
 #timer{margin-left:auto;margin-right:auto;font-size:15px;display:flex;align-items:center;gap:8px}
 #timer svg{width:18px;height:18px}
 #timer b{font-size:17px}
+.tsize{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:6px;padding:3px}
+.tsize button{border:none;background:#f0f0ea;border-radius:4px;padding:5px 9px;font-weight:700;font-size:14px}
+.tsize button:hover{background:#e2e2da}
+.tsize span{font-size:12px;color:var(--muted);min-width:38px;text-align:center}
 .vol{display:flex;align-items:center;gap:8px}
 .vol svg{width:20px;height:20px}
 .vol input{width:110px;accent-color:var(--dark)}
@@ -180,7 +185,7 @@ tr.mark-bad td.q{background:var(--red-soft);color:var(--red);font-weight:700}
     <input class="t" id="inClass" autocomplete="off" list="classList" placeholder="VD: 11IE03">
     <datalist id="classList"></datalist>
     <ul>
-      <li>Bài làm như <b>thi thật</b>: audio phát <b>một lần duy nhất</b>, không dừng, không tua.</li>
+      <li>Audio tự phát khi bắt đầu. Con có thể <b>dừng, tua đi, tua lại</b> bằng thanh audio ở trên cùng.</li>
       <li>Con nhớ đeo tai nghe và chỉnh âm lượng trước khi bấm bắt đầu.</li>
       <li>Bôi đen chữ trong đề rồi chọn <b>Highlight</b> để đánh dấu từ khoá.</li>
       <li>Hết audio con có <b>2 phút</b> để kiểm tra, sau đó bài tự nộp.</li>
@@ -212,6 +217,7 @@ tr.mark-bad td.q{background:var(--red-soft);color:var(--red);font-weight:700}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
     <span id="timerTxt"><b>--</b> minutes remaining</span>
   </div>
+  <div class="tsize" title="Cỡ chữ"><button id="fsDown" aria-label="Giảm cỡ chữ">A−</button><span id="fsPct">100%</span><button id="fsUp" aria-label="Tăng cỡ chữ">A+</button></div>
   <div class="vol" title="Volume">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
     <input type="range" id="vol" min="0" max="1" step="0.05" value="0.9">
@@ -399,7 +405,7 @@ tr.mark-bad td.q{background:var(--red-soft);color:var(--red);font-weight:700}
 <!-- fullscreen warning -->
 <div class="modal-bg hidden" id="fsWarn">
   <div class="modal">
-    <p>Thoát màn hình ra làm gì? Tôi ghi lại hết lần anh chị out ra để cheat rồi và sẽ xử lý trước lớp.</p>
+    <p>Thầy Độ đề nghị không thoát màn hình và tiếp tục làm bài.</p>
     <div style="font-size:14px;color:var(--muted)">Số lần thoát: <b id="fsCount">0</b></div>
     <div class="row"><button class="btn" id="fsBack">Quay lại toàn màn hình</button></div>
   </div>
@@ -459,7 +465,7 @@ const STKEY = "st_"+CONFIG.TEST_ID, LASTKEY="last_"+CONFIG.TEST_ID, ATKEY="att_"
 function fmtTime(s){s=Math.max(0,Math.round(s));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
 
 /* ---------- state ---------- */
-let S = {phase:"start", name:"", cls:"", answers:{}, pos:0, fsExits:0, startedAt:0, reviewLeft:CONFIG.REVIEW_SECONDS, id:uid()};
+let S = {phase:"start", name:"", cls:"", answers:{}, pos:0, fsExits:0, fsLog:[], startedAt:0, reviewLeft:CONFIG.REVIEW_SECONDS, id:uid()};
 const aud = $("#aud");
 
 /* ---------- SCORM (optional) ---------- */
@@ -618,15 +624,24 @@ $("#hlClearAll").onclick=()=>{ $$("mark.hl").forEach(unwrap); hideMenu(); };
    ============================================================ */
 function fsEl(){return document.fullscreenElement||document.webkitFullscreenElement;}
 function goFS(){ const el=document.documentElement; const f=el.requestFullscreen||el.webkitRequestFullscreen; if(f){ try{const p=f.call(el); if(p&&p.catch) p.catch(()=>{});}catch(e){} } LS.set("fs_pref",1); }
+function closeFsExit(){ const L=S.fsLog||[]; const e=L[L.length-1]; if(e&&e.back==null) e.back=Date.now(); }
+function fsSummary(){ return (S.fsLog||[]).map(e=>({at:new Date(e.out).toISOString(), sec:Math.round(((e.back||Date.now())-e.out)/1000), audio:e.audio})); }
 function onFSChange(){
   if(S.phase!=="test") return;
-  if(!fsEl()){ S.fsExits++; $("#fsCount").textContent=S.fsExits; $("#fsWarn").classList.remove("hidden"); saveState(); }
-  else $("#fsWarn").classList.add("hidden");
+  S.fsLog=S.fsLog||[];
+  const open=S.fsLog.length&&S.fsLog[S.fsLog.length-1].back==null;
+  if(!fsEl()){ if(!open){ S.fsExits++; S.fsLog.push({out:Date.now(),back:null,audio:Math.round(aud.currentTime||0)}); } $("#fsCount").textContent=S.fsExits; $("#fsWarn").classList.remove("hidden"); saveState(); }
+  else { closeFsExit(); $("#fsWarn").classList.add("hidden"); saveState(); }
 }
 document.addEventListener("fullscreenchange",onFSChange); document.addEventListener("webkitfullscreenchange",onFSChange);
 $("#fsBack").onclick=()=>{ goFS(); $("#fsWarn").classList.add("hidden"); };
 // remember the full-screen setting: re-enter on the first click if the student had it on
 document.addEventListener("click",()=>{ if(LS.get("fs_pref",0)&&!fsEl()&&(S.phase==="test")) goFS(); },true);
+
+/* ---------- text size ---------- */
+let zoom=LS.get("zoom",1);
+function applyZoom(){ zoom=Math.max(0.9,Math.min(1.8,Math.round(zoom*10)/10)); $("#main").style.zoom=zoom; $("#fsPct").textContent=Math.round(zoom*100)+"%"; LS.set("zoom",zoom); }
+$("#fsUp").onclick=()=>{zoom+=0.1;applyZoom();}; $("#fsDown").onclick=()=>{zoom-=0.1;applyZoom();}; applyZoom();
 
 /* ============================================================
    TEST FLOW
@@ -644,7 +659,7 @@ async function serverAttempts(name,cls){
     const r=await fetch(u,{signal:ctl.signal}); clearTimeout(t); const j=await r.json(); return typeof j.count==="number"?j.count:null; }catch(e){ return null; }
 }
 
-function showTestUI(){ ["#hdr","#main","#nav"].forEach(s=>$(s).classList.remove("hidden")); $("#hName").textContent=S.name; $("#hClass").textContent=S.cls; }
+function showTestUI(){ showAudioBar(S.phase==="test"); ["#hdr","#main","#nav"].forEach(s=>$(s).classList.remove("hidden")); $("#hName").textContent=S.name; $("#hClass").textContent=S.cls; }
 function startAudio(){
   aud.currentTime=S.pos||0;
   const p=aud.play(); if(p&&p.catch) p.catch(()=>{ $("#resumeScreen").classList.remove("hidden"); });
@@ -657,8 +672,10 @@ aud.addEventListener("timeupdate",()=>{
   updateTimer();
 });
 aud.addEventListener("ended",()=>{ if(S.phase==="test") startReviewCountdown(); });
+aud.addEventListener("play",()=>{ if(S.phase==="test"&&reviewTimer){ clearInterval(reviewTimer); reviewTimer=null; S.reviewLeft=CONFIG.REVIEW_SECONDS; updateTimer(); } });
 // students cannot pause / seek during the test
-aud.addEventListener("pause",()=>{ if(S.phase==="test" && !aud.ended && !reviewTimer && $("#resumeScreen").classList.contains("hidden")) setTimeout(()=>{ if(S.phase==="test"&&!aud.ended) aud.play().catch(()=>{}); },50); });
+// audio bar: students may pause / seek during the test
+function showAudioBar(on){ if(on){ $("#hdr").insertBefore(aud,$("#timer")); aud.controls=true; } else { aud.controls=false; document.body.appendChild(aud); } }
 
 function updateTimer(){
   let left; if(reviewTimer) left=S.reviewLeft; else left=(aud.duration||1531)-(aud.currentTime||0)+CONFIG.REVIEW_SECONDS;
@@ -682,7 +699,7 @@ $("#btnStart").onclick=async()=>{
   const sv=await serverAttempts(name,cls); const used=Math.max(sv??0,localAttempts());
   $("#btnStart").disabled=false; $("#btnStart").textContent="Bắt đầu làm bài";
   if(used>=CONFIG.MAX_ATTEMPTS){ err.textContent=`Con đã dùng hết ${CONFIG.MAX_ATTEMPTS} lần làm bài này.`; return; }
-  S.attempt=used+1; S.phase="test"; S.answers={}; S.pos=0; S.fsExits=0; S.startedAt=Date.now(); S.reviewLeft=CONFIG.REVIEW_SECONDS; S.id=uid();
+  S.attempt=used+1; S.phase="test"; S.answers={}; S.pos=0; S.fsExits=0; S.fsLog=[]; S.startedAt=Date.now(); S.reviewLeft=CONFIG.REVIEW_SECONDS; S.id=uid();
   LS.set("who",{name,cls});
   goFS(); $("#startScreen").classList.add("hidden"); showTestUI(); buildNav(); showPart(1); saveState(); startAudio();
 };
@@ -700,10 +717,10 @@ $("#cfYes").onclick=()=>{ $("#confirmBox").classList.add("hidden"); submit(false
 async function submit(auto){
   if(S.phase!=="test") return;
   if(reviewTimer){clearInterval(reviewTimer);reviewTimer=null;}
-  S.phase="sending"; aud.pause();
+  S.phase="sending"; aud.pause(); closeFsExit();
   let score=0; const correct={}; SCORED.forEach(q=>{ const ok=isRight(q,S.answers[q]); correct[q]=ok; if(ok) score++; });
   const res={ id:S.id, test:CONFIG.TEST_ID, testName:CONFIG.TEST_NAME, name:S.name, cls:S.cls, attempt:S.attempt,
-    score, total:38, band:band(score), seconds:Math.round((Date.now()-S.startedAt)/1000), fsExits:S.fsExits, auto,
+    score, total:38, band:band(score), seconds:Math.round((Date.now()-S.startedAt)/1000), fsExits:S.fsExits, fsLog:fsSummary(), fsOutSec:fsSummary().reduce((a,e)=>a+e.sec,0), auto,
     answers:S.answers, correct, submittedAt:new Date().toISOString(), scorm:SCORM.on() };
   // count attempt locally
   const at=LS.get(ATKEY,{}); at[key4(S.name,S.cls)]=Math.max(at[key4(S.name,S.cls)]||0,S.attempt); LS.set(ATKEY,at);
@@ -725,7 +742,7 @@ async function submit(auto){
    ============================================================ */
 const HEAD=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="7" rx="1.5" fill="currentColor"/><rect x="17" y="14" width="4" height="7" rx="1.5" fill="currentColor"/></svg>`;
 function enterReview(res){
-  S.phase="review"; S.answers=res.answers||{}; S.name=res.name; S.cls=res.cls;
+  S.phase="review"; S.answers=res.answers||{}; S.name=res.name; S.cls=res.cls; showAudioBar(false);
   showTestUI(); if(!$("#navParts").children.length) buildNav();
   restoreAnswers(); document.body.classList.add("reviewing");
   $("#startScreen").classList.add("hidden"); $("#resumeScreen").classList.add("hidden");
